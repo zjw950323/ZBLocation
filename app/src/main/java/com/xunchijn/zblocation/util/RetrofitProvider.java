@@ -23,7 +23,7 @@ public class RetrofitProvider {
     private static final String PRE_RELEASE = "";
     //开发
     //   public static final String BASE_URL = "";
-    public static final String BASE_URL = "";
+    public static final String BASE_URL = "http://musez.fun:8088/";
 
     @NonNull
     public static Retrofit get() {

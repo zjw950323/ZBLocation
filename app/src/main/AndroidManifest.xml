@@ -22,6 +22,14 @@
     //获取设备的网络状态，鉴权所需网络代理
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     //允许sd卡写权限，需写入地图数据，禁用后无法显示地图
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    //忽略电池优化
+    <uses-permission
+        android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    你可能还需要
+    <uses-permission
+        android:name="android.permission.DEVICE_POWER"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
@@ -40,7 +48,7 @@
         android:theme="@style/AppTheme">
         <meta-data
             android:name="com.baidu.lbsapi.API_KEY"
-            android:value="请输入你的key" />
+            android:value="28zYWhIUqQmXHgcgpBaZr7dnwu19esoa" />
 
         <service
             android:name="com.baidu.location.f"
@@ -48,7 +56,11 @@
             android:process=":remote" />
         <service android:name=".util.ReportService" />
 
-        <activity android:name=".MainActivity">
+        <service
+            android:name=".util.AddressService"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <activity android:name=".MapActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

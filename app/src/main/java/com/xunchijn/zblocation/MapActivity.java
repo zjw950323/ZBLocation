@@ -1,14 +1,10 @@
 package com.xunchijn.zblocation;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.Notification;
 import android.app.PendingIntent;
-import android.app.job.JobInfo;
-import android.app.job.JobScheduler;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -16,7 +12,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import android.provider.Settings;
-import android.support.annotation.RequiresApi;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
@@ -37,45 +32,53 @@ import com.baidu.mapapi.map.MapView;
 import com.baidu.mapapi.map.MyLocationData;
 import com.baidu.mapapi.map.OverlayOptions;
 import com.baidu.mapapi.model.LatLng;
-import com.xunchijn.zblocation.util.AddressService;
+import com.xunchijn.zblocation.map.presenter.LocationContrast;
+import com.xunchijn.zblocation.map.presenter.LocationPresenter;
 import com.xunchijn.zblocation.util.NotificationUtils;
 import com.xunchijn.zblocation.util.PreferHelper;
-import com.xunchijn.zblocation.util.ReportService;
+import com.xunchijn.zblocation.util.TimeUtils;
 
 import java.util.ArrayList;
-import java.util.concurrent.TimeUnit;
+import java.util.Timer;
+import java.util.TimerTask;
 
-public class MainActivity extends Activity {
+public class MapActivity extends Activity implements LocationContrast.View {
+    private final String TAG = "MapActivityService";
     private String permissionInfo;
     private final int SDK_PERMISSION_REQUEST = 127;
-    private boolean isFirstLoc = true;
+    private LocationClient mClient;
+    private MyLocationListener myLocationListener = new MyLocationListener();
+
     private MapView mMapView;
     private BaiduMap mBaiduMap;
-    private EditText mEditPosition;
-    private LocationClient mClient;
     private Button mForegroundBtn;
-    private MyLocationListener myLocationListener = new MyLocationListener();
-    private final String TAG = "MainActivity";
+
+    private NotificationUtils mNotificationUtils;
+    private Notification notification;
+
+    private boolean isFirstLoc = true;
+    private boolean isEnableLocInForeground = false;
+    private LocationContrast.Presenter mPresenter;
+    private Timer mTimer;
+    private TimerTask mTimerTask;
+    private String number;
     private String lon;
     private String lat;
     private String address;
-    private String edit = "";
-    private NotificationUtils mNotificationUtils;
-    private Notification notification;
+    private EditText mEditPosition;
     private PreferHelper mPreferHelper;
-
-    private boolean isEnableLocInForeground = false;
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON, WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
-        mPreferHelper = new PreferHelper(MainActivity.this);
+        mPreferHelper = new PreferHelper(MapActivity.this);
         mEditPosition = findViewById(R.id.edit_flag);
         getPersimmions();
         initViews();
+        new LocationPresenter(MapActivity.this, this);
+
         // 定位初始化
         mClient = new LocationClient(this);
         LocationClientOption mOption = new LocationClientOption();
@@ -87,7 +90,6 @@ public class MainActivity extends Activity {
         mClient.registerLocationListener(myLocationListener);
         mClient.start();
 
-
         //设置后台定位
         //android8.0及以上使用NotificationUtils
         if (Build.VERSION.SDK_INT >= 26) {
@@ -97,11 +99,11 @@ public class MainActivity extends Activity {
             notification = builder2.build();
         } else {
             //获取一个Notification构造器
-            Notification.Builder builder = new Notification.Builder(MainActivity.this);
-            Intent nfIntent = new Intent(MainActivity.this, MainActivity.class);
+            Notification.Builder builder = new Notification.Builder(MapActivity.this);
+            Intent nfIntent = new Intent(MapActivity.this, MapActivity.class);
 
             builder.setContentIntent(PendingIntent.
-                    getActivity(MainActivity.this, 0, nfIntent, 0)) // 设置PendingIntent
+                    getActivity(MapActivity.this, 0, nfIntent, 0)) // 设置PendingIntent
                     .setContentTitle("后台定位功能") // 设置下拉列表里的标题
                     .setSmallIcon(R.mipmap.ic_launcher) // 设置状态栏内的小图标
                     .setContentText("正在后台定位") // 设置上下文内容
@@ -140,11 +142,11 @@ public class MainActivity extends Activity {
 
             PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
 
-            boolean hasIgnored = powerManager.isIgnoringBatteryOptimizations(MainActivity.this.getPackageName());
+            boolean hasIgnored = powerManager.isIgnoringBatteryOptimizations(MapActivity.this.getPackageName());
             //  判断当前APP是否有加入电池优化的白名单，如果没有，弹出加入电池优化的白名单的设置对话框。
-            if(!hasIgnored) {
+            if (!hasIgnored) {
                 Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                intent.setData(Uri.parse("package:"+MainActivity.this.getPackageName()));
+                intent.setData(Uri.parse("package:" + MapActivity.this.getPackageName()));
                 startActivity(intent);
             }
 
@@ -189,66 +191,91 @@ public class MainActivity extends Activity {
 
 
     private void initViews() {
-        mForegroundBtn = findViewById(R.id.bt_foreground);
-
+        mForegroundBtn = (Button) findViewById(R.id.bt_foreground);
         mForegroundBtn.setOnClickListener(new View.OnClickListener() {
-            @SuppressLint("MissingPermission")
-            @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
             @Override
             public void onClick(View v) {
                 if (isEnableLocInForeground) {
                     //关闭后台定位（true：通知栏消失；false：通知栏可手动划除）
                     mClient.disableLocInForeground(true);
-                    isEnableLocInForeground = false;
-                    mForegroundBtn.setText(R.string.startforeground);
                     mEditPosition.setFocusable(true);
                     mEditPosition.setFocusableInTouchMode(true);
-                    Intent intent = new Intent(MainActivity.this, ReportService.class);
-                    stopService(intent);
+                    isEnableLocInForeground = false;
+                    mForegroundBtn.setText(R.string.startforeground);
+                    mTimer.cancel();
+                    mTimer = null;
+                    mTimerTask.cancel();
+                    mTimerTask = null;
                 } else {
                     //开启后台定位
-                    edit = mEditPosition.getText().toString();
-                    mPreferHelper.saveNumber(edit);
-                    if (TextUtils.isEmpty(edit)) {
-                        Toast.makeText(MainActivity.this, "编号不能为空", Toast.LENGTH_SHORT).show();
+                    number = mEditPosition.getText().toString();
+                    mPreferHelper.saveNumber(number);
+                    if (TextUtils.isEmpty(number)){
+                        Toast.makeText(MapActivity.this, "编号不能为空", Toast.LENGTH_SHORT).show();
                         return;
                     }
                     mEditPosition.setFocusable(false);
                     mEditPosition.setFocusableInTouchMode(false);
                     mClient.enableLocInForeground(1, notification);
                     isEnableLocInForeground = true;
-
                     mForegroundBtn.setText(R.string.stopforeground);
-                    Intent intent = new Intent(MainActivity.this, ReportService.class);
-                    if (Build.VERSION.SDK_INT >= 21) {
-                        doService();
-                        mClient.restart();
-                      //  MainActivity.this.startForegroundService(intent);
-                    } else {
-                        // Pre-O behavior.
-                        MainActivity.this.startService(intent);
-                        mClient.restart();
-                    }
+                    mTimer = new Timer();
+                    mTimerTask = new TimerTask() {
+                        @Override
+                        public void run() {
+                            number = mPreferHelper.getNumber();
+                            lon = mPreferHelper.getLon();
+                            lat = mPreferHelper.getLat();
+                            address = mPreferHelper.getAddress();
+                            report();
+                        }
+                    };
+                    mTimer.schedule(mTimerTask, 10000, 30000);
                 }
             }
         });
-        mMapView = findViewById(R.id.mv_foreground);
+        mMapView = (MapView) findViewById(R.id.mv_foreground);
         mBaiduMap = mMapView.getMap();
         mBaiduMap.setMyLocationEnabled(true);
-
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
-    private void doService() {
-        JobScheduler jobScheduler = (JobScheduler) getSystemService(JOB_SCHEDULER_SERVICE);
-        JobInfo.Builder builder = new JobInfo.Builder(1, new ComponentName(this, AddressService.class));  //指定哪个JobService执行操作
-        builder.setMinimumLatency(TimeUnit.MILLISECONDS.toMillis(10)); //执行的最小延迟时间
-        builder.setOverrideDeadline(TimeUnit.MILLISECONDS.toMillis(15));  //执行的最长延时时间
-        builder.setRequiredNetworkType(JobInfo.NETWORK_TYPE_NOT_ROAMING);  //非漫游网络状态
-        builder.setBackoffCriteria(TimeUnit.MINUTES.toMillis(10), JobInfo.BACKOFF_POLICY_LINEAR);  //线性重试方案
-        builder.setRequiresCharging(false); // 未充电状态
-        builder.setRequiresDeviceIdle(false);//设置手机是否空闲的条件，默认false
-        jobScheduler.schedule(builder.build());
+    @Override
+    public void reportLocationSuccess() {
+        Toast.makeText(MapActivity.this, "上报成功", Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void report() {
+        if (TextUtils.isEmpty(number)) {
+            showError("编号不能为空！");
+            return;
+        }
+        if (TextUtils.isEmpty(lon)) {
+            showError("经度不能为空！");
+            return;
+        }
+        if (TextUtils.isEmpty(lat)) {
+            showError("纬度不能为空！");
+            return;
+        }
+        if (TextUtils.isEmpty(address)) {
+            showError("位置不能为空");
+        }
+        String lonLat = lon + "," + lat;
+        String timeStamp = TimeUtils.getTimeStamp();
+        if (mPresenter != null) {
+            mPresenter.reportLocation(number, lon, lat, lonLat, address, timeStamp);
+        }
+    }
+
+    @Override
+    public void showError(String error) {
+        Toast.makeText(MapActivity.this, error, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void setPresenter(LocationContrast.Presenter presenter) {
+        mPresenter = presenter;
     }
 
 
@@ -282,9 +309,10 @@ public class MainActivity extends Activity {
             mPreferHelper.saveLon(lon);
             mPreferHelper.saveLat(lat);
             mPreferHelper.saveAddress(address);
-
-            Log.d(TAG, "onReceiveLocation: " + edit);
+            Log.d(TAG, "onReceiveLocation: " + point.toString());
+            Toast.makeText(MapActivity.this,point.toString(),Toast.LENGTH_SHORT).show();
         }
     }
 
 }
+

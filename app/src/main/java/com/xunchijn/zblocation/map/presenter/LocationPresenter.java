@@ -28,12 +28,14 @@ public class LocationPresenter implements LocationContrast.Presenter {
     }
 
     @Override
-    public void reportLocation(String number, String lon, String lat, String address) {
+    public void reportLocation(String number, String lon, String lat, String lonLat, String address, String timeStamp) {
         Map<String, String> map = new HashMap<>();
-        map.put("NUMBER", number);
-        map.put("LON", lon);
-        map.put("LAT", lat);
-        map.put("ADDRESS", address);
+        map.put("account", number);
+        map.put("longitude", lon);
+        map.put("latitude", lat);
+        map.put("longitude_latitude", lonLat);
+        map.put("address", address);
+        map.put("timestamp", timeStamp);
         mLocationService.reportLocation(map).observeOn(AndroidSchedulers.mainThread())
                 .subscribe(new Observer<Response<Result<LocationResult>>>() {
                     @Override
